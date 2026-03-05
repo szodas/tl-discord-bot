@@ -71,56 +71,60 @@ export const eventCommand = new SlashCommandBuilder()
   );
 
 export async function handleEventCreate(interaction: any, repo: Repo) {
+
+  // fontos: így nem timeoutol a Discord 3 mp után
+  await interaction.deferReply();
+
   const type = interaction.options.getString("type", true);
   const title = interaction.options.getString("title", true);
-  const date = interaction.options.getString("date", true);
-  const time = interaction.options.getString("time", true);
+  const date = interaction.options.getString("date", true); // pl: 2026-03-05
+  const time = interaction.options.getString("time", true); // pl: 20:30
 
-  const durationMins = interaction.options.getInteger("duration_mins", false);
+  const duration = interaction.options.getInteger("duration_mins", false) ?? 60;
   const notes = interaction.options.getString("notes", false);
 
-  const startAt = parseDateTime(date, time);
+  // dátum + idő -> unix
+  const startDate = new Date(`${date}T${time}:00`);
+  const startAt = startDate.getTime();
 
-  if (!startAt || isNaN(startAt)) {
-    await interaction.reply({
-      content: "Hibás dátum/idő formátum. Példa: 2026-03-05 és 21:00",
-      ephemeral: true,
+  if (isNaN(startAt)) {
+    await interaction.editReply({
+      content: "❌ Hibás dátum vagy idő formátum. Használat: YYYY-MM-DD és HH:MM"
     });
     return;
   }
 
-  const now = Date.now();
-  const eventId = repo.newId("evt");
+  const eventId = repo.newId("event");
 
   const embed = eventEmbed({
     type,
     title,
     startAt,
-    durationMins: durationMins ?? null,
-    notes: notes ?? null,
+    durationMins: duration,
+    notes,
     locked: false,
-    rsvps: [],
+    rsvps: []
   });
 
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(IDS.eventTank(eventId))
-      .setLabel("🛡️ Tank")
+      .setCustomId(IDS.eventRsvp(eventId, "tank"))
+      .setLabel("🛡 Tank")
       .setStyle(ButtonStyle.Primary),
 
     new ButtonBuilder()
-      .setCustomId(IDS.eventHealer(eventId))
+      .setCustomId(IDS.eventRsvp(eventId, "healer"))
       .setLabel("💚 Healer")
       .setStyle(ButtonStyle.Success),
 
     new ButtonBuilder()
-      .setCustomId(IDS.eventDps(eventId))
-      .setLabel("⚔️ DPS")
+      .setCustomId(IDS.eventRsvp(eventId, "dps"))
+      .setLabel("⚔ DPS")
       .setStyle(ButtonStyle.Secondary),
 
     new ButtonBuilder()
-      .setCustomId(IDS.eventCant(eventId))
-      .setLabel("❌ Nem jövök")
+      .setCustomId(IDS.eventRsvp(eventId, "cant"))
+      .setLabel("❌ Can't")
       .setStyle(ButtonStyle.Danger),
 
     new ButtonBuilder()
@@ -129,11 +133,14 @@ export async function handleEventCreate(interaction: any, repo: Repo) {
       .setStyle(ButtonStyle.Secondary)
   );
 
-  const msg = await interaction.reply({
+  // reply frissítés
+  await interaction.editReply({
     embeds: [embed],
-    components: [row],
-    fetchReply: true,
+    components: [row]
   });
+
+  // message lekérése
+  const msg = await interaction.fetchReply();
 
   repo.createEvent({
     eventId,
@@ -143,9 +150,9 @@ export async function handleEventCreate(interaction: any, repo: Repo) {
     type,
     title,
     startAt,
-    durationMins: durationMins ?? null,
-    notes: notes ?? null,
+    durationMins: duration,
+    notes,
     createdBy: interaction.user.id,
-    now,
+    now: Date.now()
   });
 }

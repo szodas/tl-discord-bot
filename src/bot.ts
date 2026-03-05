@@ -106,15 +106,15 @@ client.on("interactionCreate", async (interaction: any) => {
       const sub = interaction.options.getSubcommand(false);
 
       if (name === "event" && sub === "create") {
-        return handleEventCreate(interaction, repo);
+        return await handleEventCreate(interaction, repo);
       }
 
       if (name === "bossvote" && sub === "start") {
-        return handleBossvoteStart(interaction, repo);
+        return await handleBossvoteStart(interaction, repo);
       }
 
       if (name === "item") {
-        return handleItem(interaction, repo, cfg);
+        return await handleItem(interaction, repo, cfg);
       }
 
       return;
@@ -132,11 +132,11 @@ client.on("interactionCreate", async (interaction: any) => {
       const action = parts[1];
 
       if (action === "prev" || action === "next") {
-        return handleItemPaging(interaction, repo, cfg);
+        return await handleItemPaging(interaction, repo, cfg);
       }
 
       if (action === "pick") {
-        return handleItemPick(interaction, repo, cfg);
+        return await handleItemPick(interaction, repo, cfg);
       }
     }
 
