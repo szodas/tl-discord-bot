@@ -19,7 +19,13 @@ import { fileURLToPath } from "node:url";
 import { eventCommand, handleEventCreate } from "./commands/event.js";
 import { bossvoteCommand, handleBossvoteStart } from "./commands/bossvote.js";
 import { itemCommand, handleItem, handleItemPaging, handleItemPick } from "./commands/item.js";
+import http from "node:http";
 
+const port = Number(process.env.PORT || 8000);
+http.createServer((_req, res) => {
+  res.writeHead(200);
+  res.end("bot running");
+}).listen(port, "0.0.0.0", () => console.log("HTTP server running on", port));
 
 process.on("unhandledRejection", (e) => console.error("unhandledRejection", e));
 process.on("uncaughtException", (e) => console.error("uncaughtException", e));
