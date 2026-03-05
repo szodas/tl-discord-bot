@@ -11,12 +11,10 @@ import { eventEmbed } from "../ui/embeds.js";
 function parseDateTime(date: string, time: string) {
   // date: YYYY-MM-DD
   // time: HH:MM
-
   const [y, m, d] = date.split("-").map(Number);
   const [hh, mm] = time.split(":").map(Number);
 
   const dt = new Date(y, m - 1, d, hh, mm, 0);
-
   return dt.getTime();
 }
 
@@ -39,39 +37,24 @@ export const eventCommand = new SlashCommandBuilder()
             { name: "Siege", value: "Siege" },
             { name: "Archboss", value: "Archboss" },
             { name: "Other", value: "Other" },
-          )
+          ),
+      )
+      .addStringOption(o => o.setName("title").setDescription("Cím").setRequired(true))
+      .addStringOption(o =>
+        o.setName("date").setDescription("Dátum (YYYY-MM-DD)").setRequired(true),
       )
       .addStringOption(o =>
-        o.setName("title").setDescription("Cím").setRequired(true)
-      )
-      .addStringOption(o =>
-        o
-          .setName("date")
-          .setDescription("Dátum (YYYY-MM-DD)")
-          .setRequired(true)
-      )
-      .addStringOption(o =>
-        o
-          .setName("time")
-          .setDescription("Idő (HH:MM)")
-          .setRequired(true)
+        o.setName("time").setDescription("Idő (HH:MM)").setRequired(true),
       )
       .addIntegerOption(o =>
-        o
-          .setName("duration_mins")
-          .setDescription("Időtartam percben")
-          .setRequired(false)
+        o.setName("duration_mins").setDescription("Időtartam percben").setRequired(false),
       )
       .addStringOption(o =>
-        o
-          .setName("notes")
-          .setDescription("Megjegyzés")
-          .setRequired(false)
-      )
+        o.setName("notes").setDescription("Megjegyzés").setRequired(false),
+      ),
   );
 
 export async function handleEventCreate(interaction: any, repo: Repo) {
-
   // fontos: így nem timeoutol a Discord 3 mp után
   await interaction.deferReply();
 
@@ -83,63 +66,64 @@ export async function handleEventCreate(interaction: any, repo: Repo) {
   const duration = interaction.options.getInteger("duration_mins", false) ?? 60;
   const notes = interaction.options.getString("notes", false);
 
-  // dátum + idő -> unix
-  const startDate = new Date(`${date}T${time}:00`);
-  const startAt = startDate.getTime();
+  // dátum + idő -> unix (ms)
+  // parseDateTime marad, ez stabilabb, mint Date string parse környezetfüggően
+  const startAt = parseDateTime(date, time);
 
   if (isNaN(startAt)) {
     await interaction.editReply({
-      content: "❌ Hibás dátum vagy idő formátum. Használat: YYYY-MM-DD és HH:MM"
+      content: "❌ Hibás dátum vagy idő formátum. Használat: YYYY-MM-DD és HH:MM",
     });
     return;
   }
 
-  const eventId = repo.newId("event");
+  // repo.newId prefix: nálad eddig evt/poll ment, itt maradjon "evt" kompatibilisre
+  const eventId = repo.newId("evt");
 
   const embed = eventEmbed({
     type,
     title,
     startAt,
     durationMins: duration,
-    notes,
+    notes: notes ?? null,
     locked: false,
-    rsvps: []
+    rsvps: [],
   });
 
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(IDS.eventRsvp(eventId, "tank"))
-      .setLabel("🛡 Tank")
+      .setCustomId(IDS.eventTank(eventId))
+      .setLabel("🛡️ Tank")
       .setStyle(ButtonStyle.Primary),
 
     new ButtonBuilder()
-      .setCustomId(IDS.eventRsvp(eventId, "healer"))
+      .setCustomId(IDS.eventHealer(eventId))
       .setLabel("💚 Healer")
       .setStyle(ButtonStyle.Success),
 
     new ButtonBuilder()
-      .setCustomId(IDS.eventRsvp(eventId, "dps"))
-      .setLabel("⚔ DPS")
+      .setCustomId(IDS.eventDps(eventId))
+      .setLabel("⚔️ DPS")
       .setStyle(ButtonStyle.Secondary),
 
     new ButtonBuilder()
-      .setCustomId(IDS.eventRsvp(eventId, "cant"))
-      .setLabel("❌ Can't")
+      .setCustomId(IDS.eventCant(eventId))
+      .setLabel("❌ Nem jövök")
       .setStyle(ButtonStyle.Danger),
 
     new ButtonBuilder()
       .setCustomId(IDS.eventLock(eventId))
       .setLabel("🔒 Lock")
-      .setStyle(ButtonStyle.Secondary)
+      .setStyle(ButtonStyle.Secondary),
   );
 
   // reply frissítés
   await interaction.editReply({
     embeds: [embed],
-    components: [row]
+    components: [row],
   });
 
-  // message lekérése
+  // message lekérése (ID mentéshez)
   const msg = await interaction.fetchReply();
 
   repo.createEvent({
@@ -151,8 +135,8 @@ export async function handleEventCreate(interaction: any, repo: Repo) {
     title,
     startAt,
     durationMins: duration,
-    notes,
+    notes: notes ?? null,
     createdBy: interaction.user.id,
-    now: Date.now()
+    now: Date.now(),
   });
 }
