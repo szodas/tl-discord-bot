@@ -55,8 +55,16 @@ export const eventCommand = new SlashCommandBuilder()
   );
 
 export async function handleEventCreate(interaction: any, repo: Repo) {
-  // fontos: így nem timeoutol a Discord 3 mp után
-  await interaction.deferReply();
+  // --- SAFETY: ha a Koyeb épp restartol / interaction lejárt, ne döljön el a bot
+  try {
+    if (!interaction.deferred && !interaction.replied) {
+      await interaction.deferReply();
+    }
+  } catch (e: any) {
+    // 10062: Unknown interaction (lejárt / már nincs callback)
+    if (e?.code === 10062) return;
+    throw e;
+  }
 
   const type = interaction.options.getString("type", true);
   const title = interaction.options.getString("title", true);
@@ -66,18 +74,21 @@ export async function handleEventCreate(interaction: any, repo: Repo) {
   const duration = interaction.options.getInteger("duration_mins", false) ?? 60;
   const notes = interaction.options.getString("notes", false);
 
-  // dátum + idő -> unix (ms)
-  // parseDateTime marad, ez stabilabb, mint Date string parse környezetfüggően
   const startAt = parseDateTime(date, time);
 
   if (isNaN(startAt)) {
-    await interaction.editReply({
-      content: "❌ Hibás dátum vagy idő formátum. Használat: YYYY-MM-DD és HH:MM",
-    });
+    try {
+      await interaction.editReply({
+        content: "❌ Hibás dátum vagy idő formátum. Használat: YYYY-MM-DD és HH:MM",
+      });
+    } catch (e: any) {
+      if (e?.code === 10062) return;
+      throw e;
+    }
     return;
   }
 
-  // repo.newId prefix: nálad eddig evt/poll ment, itt maradjon "evt" kompatibilisre
+  // maradjon kompatibilis a meglévő DB/Repo logikával
   const eventId = repo.newId("evt");
 
   const embed = eventEmbed({
@@ -118,13 +129,24 @@ export async function handleEventCreate(interaction: any, repo: Repo) {
   );
 
   // reply frissítés
-  await interaction.editReply({
-    embeds: [embed],
-    components: [row],
-  });
+  try {
+    await interaction.editReply({
+      embeds: [embed],
+      components: [row],
+    });
+  } catch (e: any) {
+    if (e?.code === 10062) return;
+    throw e;
+  }
 
   // message lekérése (ID mentéshez)
-  const msg = await interaction.fetchReply();
+  let msg: any;
+  try {
+    msg = await interaction.fetchReply();
+  } catch (e: any) {
+    if (e?.code === 10062) return;
+    throw e;
+  }
 
   repo.createEvent({
     eventId,
