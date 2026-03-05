@@ -1,0 +1,22 @@
+{
+  "name": "tl-discord-bot",
+  "version": "0.2.0",
+  "type": "module",
+  "main": "dist/bot.js",
+  "scripts": {
+    "dev": "tsx src/bot.ts",
+    "build": "tsc",
+    "start": "node dist/bot.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "better-sqlite3": "^11.7.2",
+    "discord.js": "^14.17.3",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "@types/better-sqlite3": "^7.6.11"
+  }
+}
