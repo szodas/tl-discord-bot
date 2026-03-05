@@ -4,18 +4,44 @@ export class Repo {
   constructor(private db: any) {}
 
   init(schemaSql: string) {
+    // Base schema (CREATE TABLE IF NOT EXISTS + indexes)
     this.db.exec(schemaSql);
+
+    // ---- Lightweight migrations (safe for existing DBs)
+    // Add roll_sessions.ends_at if missing
+    try {
+      const cols = this.db.prepare(`PRAGMA table_info(roll_sessions)`).all() as any[];
+      const hasEndsAt = cols.some((c) => String(c.name).toLowerCase() === "ends_at");
+      if (!hasEndsAt) {
+        this.db.exec(`ALTER TABLE roll_sessions ADD COLUMN ends_at INTEGER`);
+      }
+    } catch {}
+
+    // Ensure helpful indexes exist (IF NOT EXISTS is safe)
+    try {
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_roll_sessions_due ON roll_sessions(is_closed, ends_at);
+        CREATE INDEX IF NOT EXISTS idx_roll_entries_message ON roll_entries(message_id);
+
+        CREATE INDEX IF NOT EXISTS idx_polls_due ON polls(is_closed, ends_at);
+        CREATE INDEX IF NOT EXISTS idx_poll_votes_poll_user ON poll_votes(poll_id, user_id);
+
+        CREATE INDEX IF NOT EXISTS idx_events_message ON events(message_id);
+        CREATE INDEX IF NOT EXISTS idx_event_rsvps_event ON event_rsvps(event_id);
+      `);
+    } catch {}
   }
 
   // ---- Rolls
   createRollSession(p: {
     messageId: string; guildId: string; channelId: string;
     itemId: string; itemName: string; createdBy: string; now: number;
+    endsAt?: number | null; // unix ms, nullable
   }) {
     this.db.prepare(`
-      INSERT INTO roll_sessions(message_id,guild_id,channel_id,item_id,item_name,created_by,created_at,is_closed)
-      VALUES (@messageId,@guildId,@channelId,@itemId,@itemName,@createdBy,@now,0)
-    `).run(p);
+      INSERT INTO roll_sessions(message_id,guild_id,channel_id,item_id,item_name,created_by,created_at,ends_at,is_closed)
+      VALUES (@messageId,@guildId,@channelId,@itemId,@itemName,@createdBy,@now,@endsAt,0)
+    `).run({ ...p, endsAt: p.endsAt ?? null });
   }
 
   getRollSession(messageId: string) {
@@ -24,6 +50,13 @@ export class Repo {
 
   closeRollSession(messageId: string) {
     this.db.prepare(`UPDATE roll_sessions SET is_closed=1 WHERE message_id=?`).run(messageId);
+  }
+
+  getDueRollSessions(now: number) {
+    return this.db.prepare(`
+      SELECT * FROM roll_sessions
+      WHERE is_closed=0 AND ends_at IS NOT NULL AND ends_at<=?
+    `).all(now) as any[];
   }
 
   getRollEntry(messageId: string, userId: string) {

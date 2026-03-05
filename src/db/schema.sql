@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS roll_sessions (
   item_name  TEXT NOT NULL,
   created_by TEXT NOT NULL,
   created_at INTEGER NOT NULL,
+  ends_at    INTEGER,                 -- unix ms, nullable
   is_closed  INTEGER NOT NULL DEFAULT 0
 );
 
@@ -44,10 +45,10 @@ CREATE TABLE IF NOT EXISTS poll_options (
 );
 
 CREATE TABLE IF NOT EXISTS poll_votes (
-  poll_id   TEXT NOT NULL,
-  user_id   TEXT NOT NULL,
-  user_name TEXT NOT NULL,
-  option_id TEXT NOT NULL,
+  poll_id    TEXT NOT NULL,
+  user_id    TEXT NOT NULL,
+  user_name  TEXT NOT NULL,
+  option_id  TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   PRIMARY KEY (poll_id, user_id, option_id)
 );
@@ -76,3 +77,13 @@ CREATE TABLE IF NOT EXISTS event_rsvps (
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (event_id, user_id)
 );
+
+-- Indexes (safe: IF NOT EXISTS)
+CREATE INDEX IF NOT EXISTS idx_roll_sessions_due ON roll_sessions(is_closed, ends_at);
+CREATE INDEX IF NOT EXISTS idx_roll_entries_message ON roll_entries(message_id);
+
+CREATE INDEX IF NOT EXISTS idx_polls_due ON polls(is_closed, ends_at);
+CREATE INDEX IF NOT EXISTS idx_poll_votes_poll_user ON poll_votes(poll_id, user_id);
+
+CREATE INDEX IF NOT EXISTS idx_events_message ON events(message_id);
+CREATE INDEX IF NOT EXISTS idx_event_rsvps_event ON event_rsvps(event_id);

@@ -20,7 +20,13 @@ import { startSweeper } from "./workers/sweeper.js";
 
 import { eventCommand, handleEventCreate } from "./commands/event.js";
 import { bossvoteCommand, handleBossvoteStart } from "./commands/bossvote.js";
-import { itemCommand, handleItem, handleItemPaging, handleItemPick } from "./commands/item.js";
+import {
+  itemCommand,
+  handleItem,
+  handleItemPaging,
+  handleItemPick,
+  handleItemAutocomplete, // ✅ NEW
+} from "./commands/item.js";
 
 /** ---------- HTTP health server (Koyeb) ---------- **/
 const port = Number(process.env.PORT || 8000);
@@ -140,6 +146,15 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 /** ---------- Interaction handling ---------- **/
 client.on("interactionCreate", async (interaction: any) => {
   try {
+    // ✅ NEW: Autocomplete interactions
+    if (interaction.type === InteractionType.ApplicationCommandAutocomplete) {
+      // Only /item uses autocomplete currently
+      if (interaction.commandName === "item") {
+        return await handleItemAutocomplete(interaction, cfg);
+      }
+      return;
+    }
+
     // Slash commands
     if (interaction.type === InteractionType.ApplicationCommand) {
       const name = interaction.commandName;
