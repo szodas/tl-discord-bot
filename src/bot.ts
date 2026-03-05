@@ -308,6 +308,64 @@ client.on("interactionCreate", async (interaction: any) => {
       }
     }
 
+    // ---- Events RSVP
+    if (scope === "event" && interaction.isButton()) {
+      const action = parts[1] as "tank" | "healer" | "dps" | "cant" | "lock";
+      const eventId = parts[2];
+
+      const ev = repo.getEvent(eventId);
+      if (!ev) {
+        return interaction.reply({ content: "Nincs ilyen event.", ephemeral: true });
+      }
+
+      // Permission / state checks that require an immediate reply
+      if (action === "lock") {
+        if (interaction.user.id !== ev.created_by) {
+          return interaction.reply({ content: "Csak az event indítója tudja lockolni.", ephemeral: true });
+        }
+      } else {
+        if (ev.is_locked) {
+          return interaction.reply({ content: "Az event le van zárva.", ephemeral: true });
+        }
+      }
+
+      // Ack fast to avoid "Interaction failed"
+      await interaction.deferUpdate();
+
+      if (action === "lock") {
+        repo.setEventLocked(eventId, !ev.is_locked);
+      } else {
+        repo.upsertRsvp({
+          eventId,
+          userId: interaction.user.id,
+          userName: interaction.user.username,
+          status: action,
+          now: Date.now(),
+        });
+      }
+
+      const rsvps = repo.getEventRsvps(eventId);
+      const newEv = repo.getEvent(eventId);
+      const embed = eventEmbed({
+        type: newEv.type,
+        title: newEv.title,
+        startAt: newEv.start_at,
+        durationMins: newEv.duration_mins,
+        notes: newEv.notes,
+        locked: !!newEv.is_locked,
+        rsvps,
+      });
+
+      try {
+        const msg = await interaction.channel.messages.fetch(newEv.message_id);
+        await msg.edit({ embeds: [embed] });
+      } catch (err) {
+        console.error("Failed to refresh event message", err);
+      }
+
+      return;
+    }
+
   } catch (e) {
     console.error(e);
 
