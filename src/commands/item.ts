@@ -13,6 +13,9 @@ import { rollSessionEmbed } from "../ui/embeds.js";
 
 type Cfg = { questlogBase: string; language: string; itemSearchRoute: string };
 
+type MainCategory = "weapons" | "armor" | "accessories";
+const SEARCH_CATEGORIES: MainCategory[] = ["weapons", "armor", "accessories"];
+
 function extractPageData(data: any) {
   return data?.result?.data?.pageData ?? data?.result?.data ?? data?.pageData ?? [];
 }
@@ -22,6 +25,83 @@ function extractPageCount(data: any) {
 
 function looksLikeItemId(v: string) {
   return /^[a-z0-9_]+$/i.test(v) && v.includes("_") && v.length >= 8;
+}
+
+function normalizeName(v: unknown) {
+  return String(v ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function scoreItemMatch(item: any, query: string) {
+  const q = normalizeName(query);
+  const name = normalizeName(item?.name);
+  const id = normalizeName(item?.id);
+
+  if (!q) return 0;
+  if (name === q) return 1000;
+  if (id === q) return 950;
+  if (name.startsWith(q)) return 900;
+  if (name.includes(q)) return 800;
+  if (id.startsWith(q)) return 700;
+  if (id.includes(q)) return 600;
+
+  const qWords = q.split(/\s+/).filter(Boolean);
+  if (qWords.length && qWords.every((w) => name.includes(w))) return 500;
+  if (qWords.length && qWords.every((w) => id.includes(w))) return 400;
+
+  return 0;
+}
+
+async function fetchCategoryPage(cfg: Cfg, mainCategory: MainCategory, page: number) {
+  const data = await qlGetItems({
+    base: cfg.questlogBase,
+    route: cfg.itemSearchRoute,
+    input: { language: cfg.language, page, facets: {}, mainCategory, subCategory: "" },
+  });
+
+  return {
+    pageData: extractPageData(data) as any[],
+    pageCount: extractPageCount(data),
+  };
+}
+
+async function searchAcrossCategories(cfg: Cfg, query: string) {
+  const allItems: any[] = [];
+  const seen = new Set<string>();
+
+  for (const mainCategory of SEARCH_CATEGORIES) {
+    const first = await fetchCategoryPage(cfg, mainCategory, 1);
+    const pages = Math.max(1, Number(first.pageCount) || 1);
+
+    for (const it of first.pageData) {
+      if (it?.id && !seen.has(it.id)) {
+        seen.add(it.id);
+        allItems.push(it);
+      }
+    }
+
+    for (let page = 2; page <= pages; page++) {
+      const next = await fetchCategoryPage(cfg, mainCategory, page);
+      for (const it of next.pageData) {
+        if (it?.id && !seen.has(it.id)) {
+          seen.add(it.id);
+          allItems.push(it);
+        }
+      }
+    }
+  }
+
+  return allItems
+    .map((it) => ({ it, score: scoreItemMatch(it, query) }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return String(a.it?.name ?? a.it?.id).localeCompare(String(b.it?.name ?? b.it?.id));
+    })
+    .map((x) => x.it);
 }
 
 async function postRollMessage(
@@ -101,14 +181,8 @@ export async function handleItemAutocomplete(interaction: any, cfg: Cfg) {
       return await interaction.respond([]);
     }
 
-    const data = await qlGetItems({
-      base: cfg.questlogBase,
-      route: cfg.itemSearchRoute,
-      input: { language: cfg.language, query: focused, page: 1, facets: {} }
-    });
-
-    const pageData = extractPageData(data) as any[];
-    const top = pageData.slice(0, 25);
+    const results = await searchAcrossCategories(cfg, focused);
+    const top = results.slice(0, 25);
 
     const choices = top.map((it: any) => ({
       name: String(it.name ?? it.id).slice(0, 100),
@@ -143,27 +217,21 @@ export async function handleItem(interaction: any, repo: Repo, cfg: Cfg) {
 
   const nonce = repo.newId("itm");
   const page = 1;
+  const results = await searchAcrossCategories(cfg, q);
 
-  const data = await qlGetItems({
-    base: cfg.questlogBase,
-    route: cfg.itemSearchRoute,
-    input: { language: cfg.language, query: q, page, facets: {}, mainCategory: "weapons" }
-  });
-
-  const pageData = extractPageData(data) as any[];
-  const pageCount = extractPageCount(data);
-
-  if (!pageData.length) {
+  if (!results.length) {
     await interaction.reply({ content: "Nincs találat.", ephemeral: true });
     return;
   }
 
-  const top = pageData.slice(0, 25);
+  const pageSize = 25;
+  const pageCount = Math.max(1, Math.ceil(results.length / pageSize));
+  const pageData = results.slice(0, pageSize);
 
   const select = new StringSelectMenuBuilder()
     .setCustomId(IDS.itemPick(nonce, page))
     .setPlaceholder("Válassz itemet…")
-    .addOptions(top.map((it: any) => ({
+    .addOptions(pageData.map((it: any) => ({
       label: String(it.name ?? it.id).slice(0, 100),
       value: String(it.id),
       description: `${it.mainCategory ?? ""}/${it.subCategory ?? ""}`.slice(0, 100) || undefined,
@@ -178,7 +246,7 @@ export async function handleItem(interaction: any, repo: Repo, cfg: Cfg) {
 
   const embed = new EmbedBuilder()
     .setTitle("Item keresés")
-    .setDescription(`Keresés: **${q}**\nOldal: **${page}/${pageCount}**\nTalálatok: **${pageData.length}**`);
+    .setDescription(`Keresés: **${q}**\nOldal: **${page}/${pageCount}**\nTalálatok: **${results.length}**`);
 
   await interaction.reply({
     embeds: [embed],
@@ -194,6 +262,7 @@ export async function handleItem(interaction: any, repo: Repo, cfg: Cfg) {
     createdBy: interaction.user.id,
     language: cfg.language,
     durationMins,
+    results,
   });
 }
 
@@ -208,27 +277,18 @@ export async function handleItemPaging(interaction: any, repo: Repo, cfg: Cfg) {
   if (!state) return interaction.reply({ content: "Lejárt keresés (indíts új /item-et).", ephemeral: true });
   if (state.createdBy !== interaction.user.id) return interaction.reply({ content: "Ezt a keresést csak az indító használhatja.", ephemeral: true });
 
-  const nextPage = action === "prev" ? Math.max(1, currentPage - 1) : currentPage + 1;
-
-  const data = await qlGetItems({
-    base: cfg.questlogBase,
-    route: cfg.itemSearchRoute,
-    input: { language: cfg.language, query: state.q, page: nextPage, facets: {} }
-  });
-
-  const pageData = extractPageData(data) as any[];
-  const pageCount = extractPageCount(data);
+  const nextPage = action === "prev" ? Math.max(1, currentPage - 1) : Math.min(state.pageCount, currentPage + 1);
+  const pageSize = 25;
+  const pageData = state.results.slice((nextPage - 1) * pageSize, nextPage * pageSize);
 
   if (!pageData.length) {
     return interaction.reply({ content: "Nincs találat ezen az oldalon.", ephemeral: true });
   }
 
-  const top = pageData.slice(0, 25);
-
   const select = new StringSelectMenuBuilder()
     .setCustomId(IDS.itemPick(nonce, nextPage))
     .setPlaceholder("Válassz itemet…")
-    .addOptions(top.map((it: any) => ({
+    .addOptions(pageData.map((it: any) => ({
       label: String(it.name ?? it.id).slice(0, 100),
       value: String(it.id),
       description: `${it.mainCategory ?? ""}/${it.subCategory ?? ""}`.slice(0, 100) || undefined,
@@ -238,14 +298,12 @@ export async function handleItemPaging(interaction: any, repo: Repo, cfg: Cfg) {
 
   const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(IDS.itemPrev(nonce, nextPage)).setLabel("⬅️ Prev").setStyle(ButtonStyle.Secondary).setDisabled(nextPage <= 1),
-    new ButtonBuilder().setCustomId(IDS.itemNext(nonce, nextPage)).setLabel("Next ➡️").setStyle(ButtonStyle.Secondary).setDisabled(nextPage >= pageCount),
+    new ButtonBuilder().setCustomId(IDS.itemNext(nonce, nextPage)).setLabel("Next ➡️").setStyle(ButtonStyle.Secondary).setDisabled(nextPage >= state.pageCount),
   );
 
   const embed = new EmbedBuilder()
     .setTitle("Item keresés")
-    .setDescription(`Keresés: **${state.q}**\nOldal: **${nextPage}/${pageCount}**\nTalálatok: **${pageData.length}**`);
-
-  client.__itemSearch.set(nonce, { ...state, pageCount });
+    .setDescription(`Keresés: **${state.q}**\nOldal: **${nextPage}/${state.pageCount}**\nTalálatok: **${state.results.length}**`);
 
   await interaction.update({ embeds: [embed], components: [row1, row2] });
 }
