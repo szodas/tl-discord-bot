@@ -8,6 +8,50 @@ export function rollResultsEmbed(itemName: string, entries: { user_name: string;
     .setDescription(top.length ? top.join("\n") : "Még senki nem rollolt.");
 }
 
+export function rollSessionEmbed(p: {
+  itemName: string;
+  itemId: string;
+  endsAt?: number | null;
+  closed?: boolean;
+  entries: { user_name: string; roll_value: number }[];
+}) {
+  const sorted = [...p.entries].sort((a, b) => b.roll_value - a.roll_value);
+  const lines = sorted.slice(0, 25).map((e, i) => `${i + 1}. **${e.user_name}** — ${e.roll_value}`);
+
+  const endBlock = p.endsAt
+    ? `Lejár: <t:${Math.floor(p.endsAt / 1000)}:R>\nPontosan: <t:${Math.floor(p.endsAt / 1000)}:F>`
+    : "Lejárat: manuálisan (Close gomb)";
+
+  return new EmbedBuilder()
+    .setTitle(`🎲 ${p.itemName}`)
+    .setDescription(`ID: \`${p.itemId}\`\n${endBlock}\nÁllapot: ${p.closed ? "⛔ Lezárva" : "🟢 Nyitva"}`)
+    .addFields({
+      name: `Rollok (${sorted.length})`,
+      value: lines.length ? lines.join("\n") : "Még senki nem rollolt.",
+    });
+}
+
+export function rollWinnerText(itemName: string, entries: { user_name: string; roll_value: number }[]) {
+  if (!entries.length) {
+    return `🎲 **${itemName}** — a roll lezárult, de nem érkezett dobás.`;
+  }
+
+  const sorted = [...entries].sort((a, b) => {
+    if (b.roll_value !== a.roll_value) return b.roll_value - a.roll_value;
+    return 0;
+  });
+
+  const best = sorted[0];
+  const tied = sorted.filter((e) => e.roll_value === best.roll_value);
+
+  if (tied.length > 1) {
+    const names = tied.map((e) => `**${e.user_name}**`).join(", ");
+    return `🎲 **${itemName}** — döntetlen az első helyen (${best.roll_value}): ${names}`;
+  }
+
+  return `🏆 **${itemName}** nyertese: **${best.user_name}** (${best.roll_value})`;
+}
+
 export function pollResultsText(title: string, rows: { label: string; count: number }[]) {
   const sorted = [...rows].sort((a, b) => b.count - a.count);
   const lines = sorted.map(r => `**${r.label}** — ${r.count}`);

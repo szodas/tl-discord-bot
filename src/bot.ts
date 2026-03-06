@@ -15,7 +15,7 @@ import {
 
 import { openDb } from "./db/db.js";
 import { Repo } from "./db/repo.js";
-import { rollResultsEmbed, eventEmbed, pollResultsText } from "./ui/embeds.js";
+import { rollResultsEmbed, eventEmbed, pollResultsText, rollSessionEmbed, rollWinnerText } from "./ui/embeds.js";
 import { startSweeper } from "./workers/sweeper.js";
 
 import { eventCommand, handleEventCreate } from "./commands/event.js";
@@ -25,6 +25,7 @@ import {
   handleItem,
   handleItemPaging,
   handleItemPick,
+  handleItemAutocomplete,
 } from "./commands/item.js";
 
 /** ---------- HTTP health server (Koyeb) ---------- **/
@@ -91,6 +92,14 @@ function d100() {
   return Math.floor(Math.random() * 100) + 1;
 }
 
+function getDisplayName(interaction: any) {
+  return interaction.member?.displayName
+    ?? interaction.member?.nickname
+    ?? interaction.user?.globalName
+    ?? interaction.user?.username
+    ?? "Unknown";
+}
+
 function disableMessageComponents(message: any) {
   const rows = (message.components ?? []).map((row: any) => {
     const json = typeof row.toJSON === "function" ? row.toJSON() : row;
@@ -119,19 +128,15 @@ async function shutdown(signal: string) {
 
   console.log(`[${signal}] graceful shutdown...`);
 
-  // Stop HTTP server
   await new Promise<void>((resolve) => {
     server.close(() => resolve());
   });
 
-  // Disconnect Discord
   try {
     client.destroy();
   } catch {}
 
-  // Close DB if your db wrapper exposes close (optional)
   try {
-    // better-sqlite3 has db.close()
     (db as any)?.close?.();
   } catch {}
 
@@ -145,6 +150,13 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 /** ---------- Interaction handling ---------- **/
 client.on("interactionCreate", async (interaction: any) => {
   try {
+    // Item autocomplete
+    if (interaction.type === InteractionType.ApplicationCommandAutocomplete) {
+      if (interaction.commandName === "item") {
+        return await handleItemAutocomplete(interaction, cfg);
+      }
+      return;
+    }
 
     // Slash commands
     if (interaction.type === InteractionType.ApplicationCommand) {
@@ -209,13 +221,32 @@ client.on("interactionCreate", async (interaction: any) => {
         }
 
         const value = d100();
+        const userName = getDisplayName(interaction);
+
         repo.insertRollEntry({
           messageId,
           userId: interaction.user.id,
-          userName: interaction.user.username,
+          userName,
           value,
           now: Date.now(),
         });
+
+        const entries = repo.getRollEntries(messageId);
+
+        try {
+          const msg = await interaction.channel.messages.fetch(messageId);
+          await msg.edit({
+            embeds: [
+              rollSessionEmbed({
+                itemName: session.item_name,
+                itemId: session.item_id,
+                endsAt: session.ends_at,
+                closed: false,
+                entries,
+              }),
+            ],
+          });
+        } catch {}
 
         return interaction.reply({ content: `Rollod: **${value}** 🎲`, ephemeral: true });
       }
@@ -234,11 +265,27 @@ client.on("interactionCreate", async (interaction: any) => {
           });
         }
 
+        const entries = repo.getRollEntries(messageId);
         repo.closeRollSession(messageId);
 
         try {
           const msg = await interaction.channel.messages.fetch(messageId);
-          await msg.edit({ components: disableMessageComponents(msg) });
+          await msg.edit({
+            embeds: [
+              rollSessionEmbed({
+                itemName: session.item_name,
+                itemId: session.item_id,
+                endsAt: session.ends_at,
+                closed: true,
+                entries,
+              }),
+            ],
+            components: disableMessageComponents(msg),
+          });
+        } catch {}
+
+        try {
+          await (interaction.channel as any).send(rollWinnerText(session.item_name, entries));
         } catch {}
 
         return interaction.reply({ content: "⛔ Roll session lezárva.", ephemeral: true });
@@ -260,11 +307,12 @@ client.on("interactionCreate", async (interaction: any) => {
         repo.clearUserVotes(pollId, interaction.user.id);
 
         const now = Date.now();
+        const userName = getDisplayName(interaction);
         for (const v of values) {
           repo.addUserVote({
             pollId,
             userId: interaction.user.id,
-            userName: interaction.user.username,
+            userName,
             optionId: v,
             now,
           });
@@ -318,7 +366,6 @@ client.on("interactionCreate", async (interaction: any) => {
         }
       }
 
-      // Ack fast
       await interaction.deferUpdate();
 
       if (action === "lock") {
@@ -327,7 +374,7 @@ client.on("interactionCreate", async (interaction: any) => {
         repo.upsertRsvp({
           eventId,
           userId: interaction.user.id,
-          userName: interaction.user.username,
+          userName: getDisplayName(interaction),
           status: action,
           now: Date.now(),
         });

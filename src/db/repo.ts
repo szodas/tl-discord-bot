@@ -4,11 +4,8 @@ export class Repo {
   constructor(private db: any) {}
 
   init(schemaSql: string) {
-    // Base schema (CREATE TABLE IF NOT EXISTS + indexes)
     this.db.exec(schemaSql);
 
-    // ---- Lightweight migrations (safe for existing DBs)
-    // Add roll_sessions.ends_at if missing
     try {
       const cols = this.db.prepare(`PRAGMA table_info(roll_sessions)`).all() as any[];
       const hasEndsAt = cols.some((c) => String(c.name).toLowerCase() === "ends_at");
@@ -17,7 +14,6 @@ export class Repo {
       }
     } catch {}
 
-    // Ensure helpful indexes exist (IF NOT EXISTS is safe)
     try {
       this.db.exec(`
         CREATE INDEX IF NOT EXISTS idx_roll_sessions_due ON roll_sessions(is_closed, ends_at);
@@ -36,7 +32,7 @@ export class Repo {
   createRollSession(p: {
     messageId: string; guildId: string; channelId: string;
     itemId: string; itemName: string; createdBy: string; now: number;
-    endsAt?: number | null; // unix ms, nullable
+    endsAt?: number | null;
   }) {
     this.db.prepare(`
       INSERT INTO roll_sessions(message_id,guild_id,channel_id,item_id,item_name,created_by,created_at,ends_at,is_closed)
